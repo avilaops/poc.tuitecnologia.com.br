@@ -1,0 +1,16 @@
+# Dependências
+node_modules/
+
+# Segredos — nunca versionar.
+# Em produção o serviço lê /etc/jurisflow-poc.env, fora da árvore do projeto.
+.env
+.env.*
+!.env.example
+
+# Build local (o dist versionado é o artefato publicado; builds locais não)
+.vite/
+
+# Logs e temporários
+*.log
+npm-debug.log*
+.DS_Store
