@@ -1,0 +1,78 @@
+cliente.avila.inc {
+	reverse_proxy 127.0.0.1:3001
+}
+
+app.avila.inc {
+	reverse_proxy 127.0.0.1:3004
+}
+
+wa.avilaops.com {
+	reverse_proxy 127.0.0.1:3002
+}
+
+api-pkvedacoes.avilaops.com {
+	tls internal
+	respond / "PK Vedações API OK" 200
+	reverse_proxy 127.0.0.1:9001
+}
+
+pkvedacoes.avilaops.com {
+	reverse_proxy 127.0.0.1:3003
+}
+
+http://178.105.82.48 {
+	@pkApi path /health /store/* /admin/* /auth/*
+	reverse_proxy @pkApi 127.0.0.1:9001
+}
+
+http://app.brilhax.com {
+	@insecure header X-Forwarded-Proto http
+	redir @insecure https://app.brilhax.com{uri} 308
+
+	@root path /
+	redir @root /app/ 302
+	reverse_proxy 127.0.0.1:9010 {
+		header_up X-Forwarded-Proto https
+	}
+}
+
+avila.inc, www.avila.inc {
+	root * /var/www/avila.inc
+	encode gzip zstd
+	file_server
+	handle_errors {
+		rewrite * /404.html
+		file_server
+	}
+}
+
+poc.avilaops.com {
+	reverse_proxy 127.0.0.1:3012
+}
+
+admin.saudepet.avilaops.com {
+	reverse_proxy 127.0.0.1:3005
+}
+
+saudepet.avilaops.com, www.saudepet.avilaops.com {
+	root * /var/www/saudepet-landing
+	encode gzip zstd
+	file_server
+}
+
+agricola.avilaops.com {
+	reverse_proxy 127.0.0.1:3006
+}
+
+api-agricola.avilaops.com {
+	reverse_proxy 127.0.0.1:9002
+}
+
+
+cifrainssdeobras.com.br, www.cifrainssdeobras.com.br {
+	reverse_proxy 127.0.0.1:3010
+}
+
+http://app.cifrainssdeobras.com.br {
+	reverse_proxy 127.0.0.1:3011
+}
