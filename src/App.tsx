@@ -236,7 +236,7 @@ function App() {
           <button className="search-trigger" onClick={() => setSearchOpen(true)} aria-label="Buscar processo, CDA ou parte"><Search size={17} /><span>Buscar processo, CDA ou parte</span><kbd>⌘ K</kbd></button>
           <button className="icon-button notification-button" aria-label="Notificações"><Bell size={19} /><i /></button>
           <button className="user-pill" onClick={() => navigate('poc')}><span>HP</span><div><strong>Helena Prado</strong><small>Procuradora</small></div></button>
-          <button className="logout-button" onClick={logout} aria-label="Sair da demonstração" title="Sair da demonstração"><LogOut size={17} /><span>Sair</span></button>
+          <button className="icon-button" onClick={logout} aria-label="Sair da demonstração" title="Sair"><LogOut size={18} /></button>
         </header>
 
         <div className="content-wrap">
