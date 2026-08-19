@@ -138,15 +138,10 @@ export function registerIntegrationRoutes(app, { requireSession, recordEvent }) 
           } catch (error) {
             return { tribunal, ok: false, latencyMs: error.latencyMs ?? null, error: error.message }
           }
-        }),
-        (async () => {
-          try {
-            const { payload, latencyMs } = await djenComunicacoes({ tribunal: 'TJSP', itens: 1 }, 10_000)
-            return { tribunal: 'DJEN', ok: true, latencyMs, totalIndexed: payload.count ?? null, totalRelation: 'gte' }
-          } catch (error) {
-            return { tribunal: 'DJEN', ok: false, latencyMs: error.latencyMs ?? null, error: error.message }
-          }
-        })()
+        })
+        // DJEN fica fora da checagem do servidor: o worker executa no colo de
+        // quem chama, e daqui (Europa) o geo-bloqueio barra. O navegador do
+        // usuário (no Brasil) faz a sonda do DJEN direto na tela.
       ])
       await recordEvent(req, 'integration_health_check', {
         userId: req.auth.user_id,

@@ -796,6 +796,13 @@ function IntegrationsView({ onAudit, notify }: { onAudit: (action: string, targe
       const payload = await response.json()
       const map: Record<string, ConnectorHealth> = {}
       for (const item of payload.results as ConnectorHealth[]) map[item.tribunal] = item
+      // O DJEN é sondado do navegador (o servidor está fora do Brasil).
+      try {
+        const djen = await consultarDjen('TJSP')
+        map.DJEN = { tribunal: 'DJEN', ok: true, latencyMs: djen.latency, totalIndexed: djen.total, totalRelation: 'gte' }
+      } catch {
+        map.DJEN = { tribunal: 'DJEN', ok: false, latencyMs: null, totalIndexed: null }
+      }
       setHealth(map)
       if (announce) {
         const okCount = (payload.results as ConnectorHealth[]).filter((item) => item.ok).length
@@ -816,21 +823,16 @@ function IntegrationsView({ onAudit, notify }: { onAudit: (action: string, targe
     setLookup({ loading: true })
     setComunicacoes(null)
     try {
-      // As duas consultas reais em paralelo: processo (DataJud) e
-      // citações/intimações publicadas no diário (DJEN).
-      const [processoRes, djenRes] = await Promise.all([
+      // As duas consultas reais em paralelo: processo (DataJud, via servidor)
+      // e citações/intimações do diário (DJEN, direto do navegador).
+      const [processoRes, djen] = await Promise.all([
         fetch(`${import.meta.env.BASE_URL}api/integrations/datajud/process`, {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tribunal: lookupTribunal, number: digits }),
         }),
-        fetch(`${import.meta.env.BASE_URL}api/integrations/djen/comunicacoes`, {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tribunal: lookupTribunal, number: digits }),
-        }).catch(() => null),
+        consultarDjen(lookupTribunal, digits).catch(() => null),
       ])
       const payload = await processoRes.json()
       if (!processoRes.ok) {
@@ -839,10 +841,9 @@ function IntegrationsView({ onAudit, notify }: { onAudit: (action: string, targe
         setLookup({ loading: false, result: payload.process, latency: payload.latencyMs })
         onAudit('Consulta processual real', payload.process.numeroProcesso, 'Integração', `DataJud/CNJ · ${lookupTribunal} · ${payload.latencyMs} ms.`, 'API Pública DataJud')
       }
-      if (djenRes?.ok) {
-        const djen = await djenRes.json()
-        setComunicacoes({ total: djen.total, latency: djen.latencyMs, itens: djen.comunicacoes || [] })
-        onAudit('Comunicações do diário consultadas', digits || lookupTribunal, 'Integração', `DJEN/CNJ · ${djen.comunicacoes?.length ?? 0} de ${djen.total} comunicações · ${djen.latencyMs} ms.`, 'DJEN — Comunicações')
+      if (djen) {
+        setComunicacoes(djen)
+        onAudit('Comunicações do diário consultadas', digits || lookupTribunal, 'Integração', `DJEN/CNJ · ${djen.itens.length} de ${djen.total} comunicações · ${djen.latency} ms.`, 'DJEN — Comunicações')
       }
       if (processoRes.ok) notify('Consulta real concluída: processo e comunicações do diário.')
     } catch {
@@ -932,6 +933,32 @@ function ProcessDrawer({ process, onClose }: { process: LegalProcess; onClose: (
 }
 
 const datajudTribunals = ['TJSP', 'TRF-3', 'TRT-15', 'STJ', 'TST']
+
+// Proxy do DJEN em Cloudflare Worker. É chamado DIRETO do navegador de
+// propósito: o worker executa no colo mais próximo de quem chama, e o DJEN
+// geo-bloqueia egresso fora do Brasil — do servidor (Europa) a consulta
+// falharia; do navegador do usuário (Brasil) ela passa.
+const DJEN_PROXY = 'https://djen-proxy.nicolas-85b.workers.dev'
+
+interface DjenComunicacao { id: number; data: string | null; tipo: string | null; orgao: string | null; resumo: string | null }
+
+async function consultarDjen(tribunal: string, digits?: string): Promise<{ total: number; latency: number; itens: DjenComunicacao[] }> {
+  const params = new URLSearchParams({ pagina: '1', itensPorPagina: digits ? '20' : '5', siglaTribunal: tribunal })
+  if (digits && digits.length === 20) params.set('numeroProcesso', digits)
+  const inicio = performance.now()
+  const resposta = await fetch(`${DJEN_PROXY}/api/v1/comunicacao?${params}`)
+  const latency = Math.round(performance.now() - inicio)
+  if (!resposta.ok) throw new Error(`DJEN respondeu ${resposta.status}`)
+  const payload = await resposta.json()
+  const itens: DjenComunicacao[] = (payload.items || []).map((item: Record<string, unknown>) => ({
+    id: Number(item.id),
+    data: (item.data_disponibilizacao as string) ?? null,
+    tipo: (item.tipoComunicacao as string) ?? null,
+    orgao: (item.nomeOrgao as string) ?? null,
+    resumo: String(item.texto || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 280) || null,
+  }))
+  return { total: payload.count ?? itens.length, latency, itens }
+}
 
 function formatDatajudDate(value: string | null) {
   if (!value) return '—'

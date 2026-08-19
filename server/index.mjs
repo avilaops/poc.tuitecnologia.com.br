@@ -44,7 +44,9 @@ app.use(helmet({
       scriptSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", 'data:'],
-      connectSrc: ["'self'"],
+      // O proxy do DJEN é chamado direto do navegador: o worker precisa rodar
+      // num colo brasileiro, e isso só acontece quando quem chama está no Brasil.
+      connectSrc: ["'self'", 'https://djen-proxy.nicolas-85b.workers.dev'],
       objectSrc: ["'none'"],
       frameAncestors: ["'none'"],
     },
