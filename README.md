@@ -15,7 +15,9 @@ funcionalidade — é mostrar o controle: quem entrou, quando, e o que viu.
 
 | Característica | Como está resolvido |
 |---|---|
-| Acesso | Convite de uso único, com sessão em cookie `httpOnly` + `secure` |
+| Acesso | Usuário e senha (scrypt) ou convite de uso único, com sessão em cookie `httpOnly` + `secure` |
+| Integração real | Consulta processual via API Pública DataJud/CNJ (TJSP, TRF-3, TRT-15, STJ, TST) |
+| Assinatura digital | PAdES real no servidor (CMS/PKCS#7); certificado A1 via `SIGN_P12_PATH`, A3 via PKCS#11 |
 | Rastreabilidade | Todo evento gravado em `app_sessions` e na trilha de auditoria |
 | Alerta de acesso | Notificação no Discord a cada login autenticado |
 | Exposição | `noindex,nofollow,noarchive`; escuta apenas em `127.0.0.1` |
@@ -59,16 +61,37 @@ projeto e com permissão `600` — nunca no repositório.
 ## Estrutura
 
 ```text
+src/                # front React + Vite (código-fonte)
+  App.tsx           # telas da POC (busca global, usuários, integrações, assinatura…)
+  data.ts           # dados fictícios e matriz de requisitos REF-01..REF-10
+  lib/demoEngine.ts # classificador determinístico da triagem com IA
 server/
   index.mjs         # servidor Express, sessão, rotas da API
+  users.mjs         # criação de usuários com senha, perfis e login local
+  integrations.mjs  # consulta processual real — API Pública DataJud/CNJ
+  signing.mjs       # geração e assinatura PAdES real de petições
   login-page.mjs    # tela de acesso renderizada no servidor
-  security.mjs      # verificação de token, hash, proteção de sessão
+  security.mjs      # verificação de token, hash scrypt, proteção de sessão
   access-alert.mjs  # notificação de acesso
   access-report.mjs # relatório de acessos
   schema.sql        # esquema do banco
 dist/               # front compilado, servido em produção
-deploy/             # unidade systemd
+deploy/             # unidade systemd e scripts de instalação
+docs/               # roteiro de apresentação da POC
 ```
+
+## Variáveis das integrações e da assinatura
+
+| Variável | Uso |
+|---|---|
+| `DATAJUD_API_KEY` | Chave da API Pública DataJud (padrão: chave pública documentada pelo CNJ) |
+| `SIGN_P12_PATH` | Certificado A1 (PKCS#12); sem ele, gera certificado de teste em `var/` |
+| `SIGN_P12_PASSWORD` | Senha do PKCS#12 |
+| `SIGN_PKCS11_MODULE` | Caminho do driver PKCS#11 para token A3 (opcional) |
+
+> A assinatura produzida é sempre um PAdES real. Com certificado de teste ela
+> demonstra o mecanismo; com e-CPF/e-CNPJ ICP-Brasil (A1 ou A3) passa a ter
+> validade jurídica plena — sem mudança de código.
 
 ---
 

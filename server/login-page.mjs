@@ -29,6 +29,9 @@ export function loginPage({ error = false } = {}) {
       input:focus { border-color: #75bbb2; box-shadow: 0 0 0 4px #e8f6f3; }
       .portal-button { width: 100%; height: 46px; margin-top: 23px; display: flex; align-items: center; justify-content: center; color: #fff; background: #087f76; border-radius: 9px; box-shadow: 0 10px 24px rgba(8,127,118,.2); font-size: 12px; font-weight: 700; text-decoration: none; }
       .portal-button:hover { background: #076c65; }
+      .portal-button { border: 0; cursor: pointer; font-family: inherit; }
+      .portal-link { display: block; margin-top: 14px; color: #087f76; font-size: 11px; font-weight: 650; text-align: center; text-decoration: none; }
+      .portal-link:hover { text-decoration: underline; }
       .error { margin: 0 0 5px; padding: 10px 12px; color: #a63838; background: #fff0ef; border: 1px solid #f1d4d2; border-radius: 8px; font-size: 11px; }
       .notice { margin-top: 22px; padding-top: 18px; color: #8a989e; border-top: 1px solid #e7ecee; font-size: 10px; line-height: 1.5; }
       @media (max-width: 760px) { main { grid-template-columns: 1fr; } .intro { min-height: 220px; padding: 30px; } .eyebrow { margin-top: 52px; } .intro p:last-of-type, .safety { display: none; } .form-area { padding: 38px 30px; } }
@@ -47,8 +50,17 @@ export function loginPage({ error = false } = {}) {
         <small>Acesso reservado</small>
         <h2>Entrar na demonstração</h2>
         <p class="hint">Use as credenciais fornecidas pela equipe responsável.</p>
-        ${error ? '<p class="error" role="alert">A autorização expirou ou já foi utilizada. Entre novamente pelo portal.</p>' : ''}
-        <a class="portal-button" href="https://cliente.avilaops.com/login">Entrar pelo portal do cliente</a>
+        ${error ? '<p class="error" role="alert">Credenciais inválidas ou autorização expirada. Verifique e tente novamente.</p>' : ''}
+        <form method="post" action="/api/auth/login">
+          <label>Usuário
+            <input name="username" type="text" autocomplete="username" required minlength="3" maxlength="80" placeholder="nome.sobrenome" />
+          </label>
+          <label>Senha
+            <input name="password" type="password" autocomplete="current-password" required minlength="8" placeholder="••••••••" />
+          </label>
+          <button class="portal-button" type="submit">Entrar na demonstração</button>
+        </form>
+        <a class="portal-link" href="https://cliente.avilaops.com/login">ou entrar pelo portal do cliente</a>
         <p class="notice">Por segurança, tentativas e acessos são registrados com identificador anonimizado. Não compartilhe as credenciais publicamente.</p>
       </section>
     </main>

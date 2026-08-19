@@ -6,6 +6,9 @@ import helmet from 'helmet'
 import pg from 'pg'
 import { loginPage } from './login-page.mjs'
 import { sendAccessAlert } from './access-alert.mjs'
+import { registerIntegrationRoutes } from './integrations.mjs'
+import { registerSigningRoutes } from './signing.mjs'
+import { registerUserRoutes } from './users.mjs'
 import {
   anonymizeIp,
   createSessionToken,
@@ -97,6 +100,17 @@ function setSessionCookie(res, token) {
     path: '/',
     maxAge: sessionTtlHours * 60 * 60 * 1000,
   })
+}
+
+async function createSession(req, res, user) {
+  const token = createSessionToken()
+  const context = requestContext(req)
+  await pool.query(
+    `INSERT INTO app_sessions (user_id, token_digest, ip_hash, user_agent, expires_at)
+     VALUES ($1, $2, $3, $4, now() + ($5 * interval '1 hour'))`,
+    [user.id, tokenDigest(token), context.ipHash, context.userAgent, sessionTtlHours],
+  )
+  setSessionCookie(res, token)
 }
 
 function verifySsoToken(token) {
@@ -335,6 +349,10 @@ app.get('/api/admin/monitoring', requireSession, async (_req, res, next) => {
     next(error)
   }
 })
+
+registerUserRoutes(app, { pool, requireSession, recordEvent, createSession })
+registerIntegrationRoutes(app, { requireSession, recordEvent })
+registerSigningRoutes(app, { requireSession, recordEvent })
 
 app.use(async (req, res, next) => {
   try {

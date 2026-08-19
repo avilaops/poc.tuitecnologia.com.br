@@ -14,15 +14,20 @@
     "check": "npm run test && npm run build"
   },
   "dependencies": {
+    "@signpdf/placeholder-pdf-lib": "^3.3.0",
+    "@signpdf/signer-p12": "^3.3.0",
+    "@signpdf/signpdf": "^3.3.0",
     "@vitejs/plugin-react": "latest",
     "express": "^5.1.0",
     "helmet": "^8.1.0",
+    "lucide-react": "latest",
+    "node-forge": "^1.4.0",
+    "pdf-lib": "^1.17.1",
     "pg": "^8.16.3",
-    "vite": "latest",
-    "typescript": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "lucide-react": "latest"
+    "typescript": "latest",
+    "vite": "latest"
   },
   "devDependencies": {
     "@types/react": "latest",

@@ -10,7 +10,13 @@ node_modules/
 # Build local (o dist versionado é o artefato publicado; builds locais não)
 .vite/
 
+# Gerados pelo TypeScript
+*.tsbuildinfo
+
 # Logs e temporários
 *.log
 npm-debug.log*
 .DS_Store
+
+# Certificado de teste gerado em runtime
+var/
