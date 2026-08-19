@@ -52,10 +52,10 @@ import {
   X,
   Zap,
 } from 'lucide-react'
-import { auditSeed, connectors, debtSeed, jurisprudenceSeed, money, pocRequirements, processesSeed } from './data'
+import { auditSeed, connectors, courtOrdersSeed, debtSeed, jurisprudenceSeed, money, pocRequirements, processesSeed, waitingBoxSeed } from './data'
 import { DemoSessionsView, MobileValidationView, MonitoringView, ReportsView, SecurityView, VisitorsView, managementSessionSeed } from './demoManagement'
 import { classifyLegalText, updateDebt, type ClassificationResult } from './lib/demoEngine'
-import type { AppUser, AuditEvent, DatajudProcess, DebtCertificate, LegalProcess, ViewId } from './types'
+import type { AppUser, AuditEvent, DatajudProcess, DebtCertificate, LegalProcess, ViewId, WaitingBox } from './types'
 
 type IconType = typeof LayoutDashboard
 
@@ -243,7 +243,11 @@ function App() {
             setProcesses((current) => current.map((item) => item.id === id ? { ...item, followed: !item.followed } : item))
             addAudit('Acompanhamento alterado', id, 'Usuário', 'Preferência de notificação por e-mail atualizada.')
             notify('Acompanhamento atualizado e registrado na auditoria.')
-          }} />}
+          }} onCreate={(process) => {
+            setProcesses((current) => [process, ...current])
+            addAudit('Processo cadastrado', process.number, 'Usuário', 'Cadastro inteligente concluído após verificação de litispendência.')
+            notify('Processo cadastrado com verificação de litispendência registrada.')
+          }} onAudit={addAudit} />}
           {view === 'debt' && <DebtView debts={debts} setDebts={setDebts} onAudit={addAudit} notify={notify} />}
           {view === 'deadlines' && <DeadlinesView processes={processes} setProcesses={setProcesses} onAudit={addAudit} notify={notify} />}
           {view === 'petitions' && <PetitionsView processes={processes} setProcesses={setProcesses} onAudit={addAudit} notify={notify} />}
@@ -404,13 +408,103 @@ function Metric({ label, value, trend, icon: Icon, tone }: { label: string; valu
   return <div className={`metric ${tone ?? ''}`}><span className="metric-icon"><Icon size={19} /></span><div><p>{label}</p><strong>{value}</strong><small>{trend}</small></div></div>
 }
 
-function ProcessesView({ processes, onSelect, onFollow }: { processes: LegalProcess[]; onSelect: (item: LegalProcess) => void; onFollow: (id: string) => void }) {
+function NewProcessModal({ processes, onClose, onCreate, onAudit }: { processes: LegalProcess[]; onClose: () => void; onCreate: (process: LegalProcess) => void; onAudit: (action: string, target: string, source: AuditEvent['source'], detail: string, actor?: string) => void }) {
+  const [form, setForm] = useState({ number: '', title: '', party: '', area: 'Tributário', type: 'Execução fiscal' as LegalProcess['type'], court: 'TJSP' })
+  const [checked, setChecked] = useState<{ duplicates: LegalProcess[]; related: LegalProcess[]; datajud?: DatajudProcess | null; datajudError?: string } | null>(null)
+  const [checking, setChecking] = useState(false)
+
+  const digits = form.number.replace(/\D/g, '')
+  const runCheck = async () => {
+    setChecking(true)
+    const normalizedNumber = digits
+    const duplicates = processes.filter((item) => item.number.replace(/\D/g, '') === normalizedNumber && normalizedNumber.length > 0)
+    const partyKey = form.party.trim().toLowerCase().split('—')[0].trim()
+    const related = processes.filter((item) => partyKey.length > 3 && item.party.toLowerCase().includes(partyKey) && item.number.replace(/\D/g, '') !== normalizedNumber)
+    let datajud: DatajudProcess | null | undefined
+    let datajudError: string | undefined
+    if (digits.length === 20 && datajudTribunals.includes(form.court)) {
+      try {
+        const response = await fetch(`${import.meta.env.BASE_URL}api/integrations/datajud/process`, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tribunal: form.court, number: digits }),
+        })
+        const payload = await response.json()
+        datajud = response.ok ? payload.process : null
+        if (!response.ok && response.status !== 404) datajudError = payload.error
+      } catch {
+        datajudError = 'Consulta ao tribunal indisponível no momento.'
+      }
+    }
+    setChecked({ duplicates, related, datajud, datajudError })
+    onAudit('Verificação de litispendência executada', form.number || '(sem número)', 'Automação', `${duplicates.length} duplicidade(s) na base, ${related.length} processo(s) conexo(s) por parte${datajud ? '; processo confirmado no tribunal via DataJud' : ''}.`, 'Cadastro inteligente')
+    setChecking(false)
+  }
+
+  const create = () => {
+    onCreate({
+      id: `proc-${Date.now()}`,
+      number: form.number.trim(),
+      title: form.title.trim(),
+      party: `${form.party.trim()} (fictício)`,
+      area: form.area,
+      type: form.type,
+      status: 'Em análise',
+      priority: 'Normal',
+      owner: 'Dra. Helena Prado',
+      deadline: 'A distribuir',
+      value: 0,
+      court: form.court,
+      followed: false,
+      movement: checked?.datajud ? `Cadastro validado no ${form.court} via DataJud: ${checked.datajud.classe ?? 'classe não informada'}` : 'Processo cadastrado manualmente com verificação de litispendência',
+    })
+    onClose()
+  }
+
+  const blocked = Boolean(checked?.duplicates.length)
+  const canSubmit = form.number.trim().length >= 5 && form.title.trim().length >= 5 && form.party.trim().length >= 3
+  return <div className="drawer-layer search-layer">
+    <button className="drawer-scrim" onClick={onClose} aria-label="Fechar cadastro" />
+    <section className="search-modal new-process-modal" role="dialog" aria-label="Novo processo">
+      <div className="panel-heading modal-heading"><div><p className="section-kicker">Cadastro inteligente · item 6.4.21</p><h2>Novo processo</h2></div><button className="icon-button" onClick={onClose}><X size={18} /></button></div>
+      <div className="user-form modal-form">
+        <label>Número do processo<input value={form.number} onChange={(e) => { setForm({ ...form, number: e.target.value }); setChecked(null) }} placeholder="0000000-00.0000.0.00.0000" /></label>
+        <label>Assunto<input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Execução fiscal — IPTU 2025" /></label>
+        <label>Parte e papel processual<input value={form.party} onChange={(e) => { setForm({ ...form, party: e.target.value }); setChecked(null) }} placeholder="Empresa Exemplo Ltda. — Executada" /></label>
+        <div className="form-row">
+          <label>Matéria<select value={form.area} onChange={(e) => setForm({ ...form, area: e.target.value })}>{['Tributário', 'Cível', 'Trabalhista', 'Administrativo'].map((item) => <option key={item}>{item}</option>)}</select></label>
+          <label>Tipo<select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as LegalProcess['type'] })}>{['Execução fiscal', 'Judicial', 'Administrativo'].map((item) => <option key={item}>{item}</option>)}</select></label>
+          <label>Órgão<select value={form.court} onChange={(e) => { setForm({ ...form, court: e.target.value }); setChecked(null) }}>{[...datajudTribunals, '1DOC', 'SEI'].map((item) => <option key={item}>{item}</option>)}</select></label>
+        </div>
+        {checked && <div className={`litis-result ${blocked ? 'blocked' : ''}`}>
+          {blocked
+            ? <p><AlertTriangle size={15} /> <strong>Litispendência:</strong> o número já está cadastrado ({checked.duplicates[0].title}). O cadastro em duplicidade está bloqueado.</p>
+            : <p><CheckCircle2 size={15} /> Nenhuma duplicidade pelo número na base.</p>}
+          {checked.related.length > 0 && <p><FileSearch size={15} /> {checked.related.length} processo(s) da mesma parte para conferência de conexão: {checked.related.map((item) => item.number).join(', ')}.</p>}
+          {checked.datajud && <p><BadgeCheck size={15} /> Processo confirmado no {form.court} (DataJud): {checked.datajud.classe ?? '—'} · {checked.datajud.orgaoJulgador ?? '—'}.</p>}
+          {checked.datajud === null && !checked.datajudError && <p><AlertTriangle size={15} /> Número não localizado no índice público do {form.court} — confirme antes de prosseguir.</p>}
+          {checked.datajudError && <p><AlertTriangle size={15} /> {checked.datajudError}</p>}
+        </div>}
+        <div className="modal-actions">
+          <button className="secondary-button" disabled={!canSubmit || checking} onClick={() => void runCheck()}>{checking ? <RefreshCw className="spin" size={16} /> : <FileSearch size={16} />} Verificar litispendência</button>
+          <button className="primary-button" disabled={!canSubmit || !checked || blocked} onClick={create} title={!checked ? 'Execute a verificação antes de cadastrar' : undefined}><Plus size={16} /> Cadastrar processo</button>
+        </div>
+        {!checked && <p className="search-hint">A verificação de litispendência (base local + consulta real ao tribunal quando aplicável) é obrigatória antes do cadastro.</p>}
+      </div>
+    </section>
+  </div>
+}
+
+function ProcessesView({ processes, onSelect, onFollow, onCreate, onAudit }: { processes: LegalProcess[]; onSelect: (item: LegalProcess) => void; onFollow: (id: string) => void; onCreate: (process: LegalProcess) => void; onAudit: (action: string, target: string, source: AuditEvent['source'], detail: string, actor?: string) => void }) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('Todos')
+  const [creating, setCreating] = useState(false)
   const filtered = processes.filter((item) => (filter === 'Todos' || item.type === filter) && `${item.number} ${item.title} ${item.party}`.toLowerCase().includes(query.toLowerCase()))
   return (
     <section className="panel table-panel">
-      <div className="toolbar"><div className="search-input"><Search size={17} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Número, parte ou assunto…" /></div><div className="segmented">{['Todos', 'Judicial', 'Administrativo', 'Execução fiscal'].map((item) => <button key={item} className={filter === item ? 'active' : ''} onClick={() => setFilter(item)}>{item}</button>)}</div><button className="primary-button"><Plus size={17} /> Novo processo</button></div>
+      {creating && <NewProcessModal processes={processes} onClose={() => setCreating(false)} onCreate={onCreate} onAudit={onAudit} />}
+      <div className="toolbar"><div className="search-input"><Search size={17} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Número, parte ou assunto…" /></div><div className="segmented">{['Todos', 'Judicial', 'Administrativo', 'Execução fiscal'].map((item) => <button key={item} className={filter === item ? 'active' : ''} onClick={() => setFilter(item)}>{item}</button>)}</div><button className="primary-button" onClick={() => setCreating(true)}><Plus size={17} /> Novo processo</button></div>
       <div className="table-scroll"><table className="responsive-table process-table"><thead><tr><th>Processo / assunto</th><th>Responsável</th><th>Prazo</th><th>Status</th><th>Acompanhar</th><th /></tr></thead><tbody>{filtered.map((process) => <tr key={process.id}><td className="mobile-card-title"><button className="table-primary" onClick={() => onSelect(process)}><strong>{process.title}</strong><small>{process.number} · {process.party}</small></button></td><td data-label="Responsável"><span className="owner-cell"><i>{initials(process.owner)}</i>{process.owner}</span></td><td data-label="Prazo"><span className={process.priority === 'Crítica' ? 'critical-text' : ''}>{process.deadline}</span></td><td data-label="Status"><StatusBadge value={process.status} /></td><td data-label="Acompanhamento"><button className={`follow-button ${process.followed ? 'active' : ''}`} onClick={() => onFollow(process.id)}><Bell size={16} /> {process.followed ? 'Ativo' : 'Ativar'}</button></td><td className="mobile-card-action"><button className="icon-button" onClick={() => onSelect(process)} aria-label={`Abrir ${process.title}`}><ChevronRight size={17} /></button></td></tr>)}</tbody></table></div>
       <div className="table-footer"><span>{filtered.length} de {processes.length} processos da amostra</span><span>Dados fictícios para demonstração pública</span></div>
     </section>
@@ -460,6 +554,19 @@ function DebtView({ debts, setDebts, onAudit, notify }: { debts: DebtCertificate
         </div>
       </div>
     </section>}
+    <section className="panel table-panel">
+      <div className="toolbar"><div><p className="section-kicker">Execuções contra a Fazenda · item 6.4.38-I</p><h2>Precatórios e RPVs</h2></div><span className="small-badge">{courtOrdersSeed.length} registros da amostra</span></div>
+      <div className="table-scroll"><table className="responsive-table"><thead><tr><th>Requisitório / beneficiário</th><th>Tipo</th><th>Valor</th><th>Orçamento</th><th>Situação</th></tr></thead><tbody>
+        {courtOrdersSeed.map((order) => <tr key={order.id}>
+          <td className="mobile-card-title"><span className="table-primary"><strong>{order.number}</strong><small>{order.beneficiary}</small></span></td>
+          <td data-label="Tipo"><span className="small-badge">{order.kind}</span></td>
+          <td data-label="Valor">{money(order.value)}</td>
+          <td data-label="Orçamento">{order.budgetYear}</td>
+          <td data-label="Situação"><StatusBadge value={order.status} /></td>
+        </tr>)}
+      </tbody></table></div>
+      <div className="table-footer"><span>Controle de requisitórios integrado à carteira de execução fiscal.</span><span>Dados fictícios para demonstração pública</span></div>
+    </section>
   </div>
 }
 
@@ -539,7 +646,7 @@ function PetitionsView({ processes, setProcesses, onAudit, notify }: { processes
       </div>
       {cert && !cert.icpBrasil && <div className="demo-warning"><AlertTriangle size={17} /><p><strong>Certificado de teste</strong>A assinatura CMS/PKCS#7 embutida no PDF é real; para validade jurídica, configure um e-CPF/e-CNPJ A1 ou o token A3 (driver PKCS#11).</p></div>}
       {certificate?.a3Ready && <div className="human-note"><KeyRound size={17} /><p><strong>Token A3 configurado</strong>Driver PKCS#11 carregado no servidor de assinatura.</p></div>}
-      <button disabled={!selected.length || signing} className="primary-button full" onClick={() => void sign()}>{signing ? <RefreshCw className="spin" size={17} /> : <KeyRound size={17} />} Assinar digitalmente (PAdES)</button>
+      <button disabled={!selected.length || signing} className="primary-button full" onClick={() => void sign()}>{signing ? <RefreshCw className="spin" size={17} /> : <KeyRound size={17} />} {selected.length > 1 ? `Assinar em lote (${selected.length}) — PAdES` : 'Assinar digitalmente (PAdES)'}</button>
       <p className="safe-copy">A assinatura é aplicada no servidor e o PDF assinado é baixado. Toda execução gera evento de auditoria.</p></aside>
   </div>
 }
@@ -559,7 +666,23 @@ function WorkflowsView({ onAudit, notify }: { onAudit: (action: string, target: 
     onAudit('Etapa de fluxo executada', steps[next].title, next === 1 ? 'IA' : 'Automação', `Transição fictícia registrada. Regra: ${steps[next].rule}.`, 'Orquestrador de fluxos')
     notify(`Fluxo avançou para “${steps[next].title}”.`)
   }
-  return <div className="workflow-layout"><section className="panel workflow-canvas"><div className="panel-heading"><div><p className="section-kicker">Fluxo ativo</p><h2>Tratamento de intimação judicial</h2></div><div className="toolbar-actions"><button className="secondary-button"><Settings2 size={16} /> Editar regras</button><button className="primary-button" onClick={simulate}><Play size={16} /> Simular próxima etapa</button></div></div><div className="flow-nodes">{steps.map((step, index) => { const Icon = step.icon; return <div className={`flow-node ${index === active ? 'active' : ''} ${index < active ? 'done' : ''}`} key={step.title}><div className="node-number">{index < active ? <Check size={16} /> : index + 1}</div><span className="node-icon"><Icon size={18} /></span><div><strong>{step.title}</strong><small>{step.owner}</small><p>{step.rule}</p></div>{index < steps.length - 1 && <div className="node-line" />}</div> })}</div></section><aside className="panel workflow-stats"><p className="section-kicker">Últimos 30 dias</p><h2>Desempenho do fluxo</h2><div className="big-stat"><strong>184</strong><span>instâncias executadas</span></div><div className="stat-list"><span><em>Tempo médio</em><strong>1d 4h</strong></span><span><em>Automatização</em><strong>72%</strong></span><span><em>Dentro do prazo</em><strong>98,4%</strong></span><span><em>Intervenções</em><strong>11</strong></span></div><div className="human-note"><UserCheck size={18} /><p><strong>Controle humano preservado</strong>Classificações, minutas e envios críticos possuem ponto de validação.</p></div></aside></div>
+  const [waiting, setWaiting] = useState<WaitingBox[]>(waitingBoxSeed)
+  const avocar = (item: WaitingBox) => {
+    setWaiting((current) => current.filter((entry) => entry.id !== item.id))
+    onAudit('Processo avocado da caixa de espera', item.process, 'Usuário', `Avocação antes do retorno automático (“${item.returnAt}”); tarefa devolvida à fila de decisão de ${item.owner}.`)
+    notify(`Processo ${item.process} avocado e devolvido à fila ativa.`)
+  }
+  return <div className="stack-lg"><div className="workflow-layout"><section className="panel workflow-canvas"><div className="panel-heading"><div><p className="section-kicker">Fluxo ativo</p><h2>Tratamento de intimação judicial</h2></div><div className="toolbar-actions"><button className="secondary-button"><Settings2 size={16} /> Editar regras</button><button className="primary-button" onClick={simulate}><Play size={16} /> Simular próxima etapa</button></div></div><div className="flow-nodes">{steps.map((step, index) => { const Icon = step.icon; return <div className={`flow-node ${index === active ? 'active' : ''} ${index < active ? 'done' : ''}`} key={step.title}><div className="node-number">{index < active ? <Check size={16} /> : index + 1}</div><span className="node-icon"><Icon size={18} /></span><div><strong>{step.title}</strong><small>{step.owner}</small><p>{step.rule}</p></div>{index < steps.length - 1 && <div className="node-line" />}</div> })}</div></section><aside className="panel workflow-stats"><p className="section-kicker">Últimos 30 dias</p><h2>Desempenho do fluxo</h2><div className="big-stat"><strong>184</strong><span>instâncias executadas</span></div><div className="stat-list"><span><em>Tempo médio</em><strong>1d 4h</strong></span><span><em>Automatização</em><strong>72%</strong></span><span><em>Dentro do prazo</em><strong>98,4%</strong></span><span><em>Intervenções</em><strong>11</strong></span></div><div className="human-note"><UserCheck size={18} /><p><strong>Controle humano preservado</strong>Classificações, minutas e envios críticos possuem ponto de validação.</p></div></aside></div>
+  <section className="panel">
+    <div className="panel-heading"><div><p className="section-kicker">Item 5.28 do TR</p><h2>Caixas de espera com retorno automático</h2></div><span className="small-badge">{waiting.length} em espera</span></div>
+    <div className="waiting-list">{waiting.length ? waiting.map((item) => <article className="waiting-row" key={item.id}>
+      <span className="activity-icon source-automação"><Clock3 size={15} /></span>
+      <div><strong>{item.process}</strong><p>{item.reason}</p><small>{item.owner} · {item.returnAt}</small></div>
+      <button className="secondary-button" onClick={() => avocar(item)}><RotateCcw size={15} /> Avocar agora</button>
+    </article>) : <EmptyState icon={CheckCircle2} title="Nenhum processo em espera" text="Os processos avocados voltaram à fila ativa; novos itens entram aqui automaticamente pelas regras do fluxo." />}</div>
+    <div className="table-footer"><span>O retorno automático devolve o processo à fila na data-limite sem intervenção humana.</span><span>A avocação registra evento de auditoria.</span></div>
+  </section>
+</div>
 }
 
 function AiView({ onAudit, notify }: { onAudit: (action: string, target: string, source: AuditEvent['source'], detail: string, actor?: string) => void; notify: (message: string) => void }) {
@@ -641,7 +764,7 @@ function IntegrationsView({ onAudit, notify }: { onAudit: (action: string, targe
     <div className="integration-banner real"><Network size={21} /><div><strong>Consulta processual real homologada — API Pública DataJud/CNJ</strong><p>Os conectores de tribunais executam consultas reais ao índice nacional do CNJ, com latência e resposta auditadas. DJEN, SEI/PEN e 1DOC seguem honestamente marcados como pendentes de convênio ou egresso nacional.</p></div><button className="secondary-button" disabled={checking} onClick={() => void checkHealth(true)}>{checking ? <RefreshCw className="spin" size={16} /> : <Activity size={16} />} Verificar agora</button></div>
 
     <section className="panel datajud-panel">
-      <div className="panel-heading"><div><p className="section-kicker">Consulta unitária</p><h2>Buscar processo real por número CNJ</h2></div></div>
+      <div className="panel-heading"><div><p className="section-kicker">Consulta unitária</p><h2>Buscar processo real por número CNJ</h2></div><a className="secondary-button" href={`${import.meta.env.BASE_URL}api/docs`} target="_blank" rel="noreferrer"><FileText size={16} /> Documentação da API (OpenAPI)</a></div>
       <div className="datajud-lookup-bar">
         <select value={lookupTribunal} onChange={(e) => setLookupTribunal(e.target.value)} aria-label="Tribunal">{datajudTribunals.map((item) => <option key={item}>{item}</option>)}</select>
         <div className="search-input"><Search size={16} /><input value={lookupNumber} onChange={(e) => { setLookupNumber(e.target.value); setLookup(null) }} placeholder="0000000-00.0000.0.00.0000" /></div>
@@ -862,7 +985,18 @@ function UsersView({ onAudit, notify }: { onAudit: (action: string, target: stri
   return (
     <div className="users-layout">
       <section className="panel users-table-panel">
-        <div className="panel-heading"><div><p className="section-kicker">Contas reais deste ambiente</p><h2>{users ? `${users.length} usuário(s)` : 'Carregando…'}</h2></div><button className="secondary-button" onClick={() => void load()}><RefreshCw size={16} /> Atualizar</button></div>
+        <div className="panel-heading"><div><p className="section-kicker">Contas reais deste ambiente</p><h2>{users ? `${users.length} usuário(s)` : 'Carregando…'}</h2></div><div className="toolbar-actions"><button className="secondary-button" onClick={() => void load()}><RefreshCw size={16} /> Atualizar</button><button className="secondary-button" disabled={!users?.length} onClick={() => {
+          const rows = (users ?? []).map((user) => [user.displayName, user.username, roleLabel(user.role), user.ssoOnly ? 'Convite SSO' : 'Usuário e senha', user.active ? 'Ativa' : 'Desativada', new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(user.createdAt))])
+          const csv = ['Nome;Usuário;Perfil;Origem;Situação;Criado em', ...rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(';'))].join('\r\n')
+          const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }))
+          const anchor = document.createElement('a')
+          anchor.href = url
+          anchor.download = 'jurisflow-usuarios.csv'
+          anchor.click()
+          URL.revokeObjectURL(url)
+          onAudit('Relatório de usuários exportado', `${users?.length ?? 0} conta(s)`, 'Usuário', 'Exportação CSV de todos os usuários cadastrados (item 6.4.3 do TR).')
+          notify('Relatório de usuários exportado em CSV.')
+        }}><Download size={16} /> Exportar relatório</button></div></div>
         {error && <p className="search-error"><AlertTriangle size={15} /> {error}</p>}
         <div className="table-scroll"><table className="responsive-table users-table"><thead><tr><th>Usuário</th><th>Perfil</th><th>Origem</th><th>Situação</th><th /></tr></thead><tbody>
           {(users ?? []).map((user) => <tr key={user.id}>

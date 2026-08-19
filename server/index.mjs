@@ -9,6 +9,7 @@ import { sendAccessAlert } from './access-alert.mjs'
 import { registerIntegrationRoutes } from './integrations.mjs'
 import { registerSigningRoutes } from './signing.mjs'
 import { registerUserRoutes } from './users.mjs'
+import { registerApiDocsRoutes } from './api-docs.mjs'
 import {
   anonymizeIp,
   createSessionToken,
@@ -353,6 +354,7 @@ app.get('/api/admin/monitoring', requireSession, async (_req, res, next) => {
 registerUserRoutes(app, { pool, requireSession, recordEvent, createSession })
 registerIntegrationRoutes(app, { requireSession, recordEvent })
 registerSigningRoutes(app, { requireSession, recordEvent })
+registerApiDocsRoutes(app, { requireSession })
 
 app.use(async (req, res, next) => {
   try {

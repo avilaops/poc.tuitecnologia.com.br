@@ -562,3 +562,30 @@ input[type="checkbox"] { accent-color: var(--teal); }
   .users-layout, .sweep-grid { grid-template-columns: 1fr; }
   .integration-banner .secondary-button { margin-left: 0; }
 }
+
+/* ===== Cadastro inteligente de processo (6.4.21) ===== */
+.new-process-modal { width: min(600px, calc(100vw - 32px)); }
+.modal-heading { padding: 16px 18px 0; }
+.modal-form { padding: 8px 18px 18px; }
+.form-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.litis-result { display: grid; gap: 7px; padding: 11px 13px; background: #f2f9f6; border: 1px solid #d4eae2; border-radius: 10px; }
+.litis-result.blocked { background: #fdf3f1; border-color: #f0d5d0; }
+.litis-result p { display: flex; align-items: flex-start; gap: 7px; margin: 0; color: #405660; font-size: 12px; line-height: 1.45; }
+.litis-result.blocked > p:first-child { color: var(--danger); }
+.litis-result svg { flex-shrink: 0; margin-top: 1px; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+
+/* ===== Caixas de espera (5.28) ===== */
+.waiting-list { display: grid; gap: 10px; }
+.waiting-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; }
+.waiting-row > div { flex: 1; display: grid; gap: 2px; }
+.waiting-row strong { font-size: 13px; }
+.waiting-row p { margin: 0; color: #405660; font-size: 12px; }
+.waiting-row small { color: var(--muted); font-size: 11px; }
+
+@media (max-width: 720px) { .form-row { grid-template-columns: 1fr; } .waiting-row { flex-wrap: wrap; } }
+
+/* Situações de precatórios e RPVs */
+.status-aguardando-orcamento { color: #8a621a; background: #fff2d9; }
+.status-em-pagamento { color: #416c9c; background: #e9f0f8; }
+.status-quitado { color: #137351; background: #e5f6ee; }

@@ -1,4 +1,4 @@
-import type { AuditEvent, Connector, DebtCertificate, Jurisprudence, LegalProcess, PocRequirement } from './types'
+import type { AuditEvent, Connector, CourtOrder, DebtCertificate, Jurisprudence, LegalProcess, PocRequirement, WaitingBox } from './types'
 
 export const processesSeed: LegalProcess[] = [
   {
@@ -120,6 +120,7 @@ export const connectors: Connector[] = [
   { name: 'DJEN / Comunicações CNJ', group: 'CNJ', mode: 'convenio', detail: 'Citações e intimações eletrônicas', pending: 'API pública exige egresso de rede no Brasil; roteamento nacional em homologação.' },
   { name: 'SEI / PEN', group: 'Administrativo', mode: 'convenio', detail: 'Documentos e metadados', pending: 'Depende de convênio e credenciais do órgão.' },
   { name: '1DOC', group: 'Administrativo', mode: 'convenio', detail: 'Processos e ofícios', pending: 'Depende de contrato com a plataforma.' },
+  { name: 'e-Proc', group: 'Justiça Federal', mode: 'convenio', detail: 'Processos e peticionamento', pending: 'Conector previsto para tribunais que adotam o e-Proc; TRF-3 opera com PJe.' },
   { name: 'Tributário municipal', group: 'Município', mode: 'demo', detail: 'CDAs, pagamentos e REFIS' },
 ]
 
@@ -128,6 +129,19 @@ export const jurisprudenceSeed: Jurisprudence[] = [
   { ref: 'Resolução CNJ nº 547/2024', scope: 'Extinção', holding: 'Autoriza a extinção de execuções fiscais de valor inferior a R$ 10 mil, sem movimentação útil há mais de um ano e sem citação ou bens penhoráveis.' },
   { ref: 'Súmula 452/STJ', scope: 'Suspensão', holding: 'A extinção das ações de pequeno valor é faculdade da Administração Federal, vedada a atuação judicial de ofício — a suspensão exige critério do ente credor.' },
   { ref: 'Súmula 409/STJ', scope: 'Prescrição', holding: 'Em execução fiscal, a prescrição ocorrida antes da propositura da ação pode ser decretada de ofício (art. 219, § 5º, do CPC).' },
+]
+
+export const courtOrdersSeed: CourtOrder[] = [
+  { id: 'ord-1', kind: 'Precatório', number: 'PRC-2025/00318', beneficiary: 'Construtora Alvorada Ltda. (fictício)', value: 412830.5, budgetYear: '2027', status: 'Aguardando orçamento' },
+  { id: 'ord-2', kind: 'Precatório', number: 'PRC-2024/00291', beneficiary: 'Maria Aparecida Duarte (fictício)', value: 187420.0, budgetYear: '2026', status: 'Em pagamento' },
+  { id: 'ord-3', kind: 'RPV', number: 'RPV-2026/01142', beneficiary: 'José Carlos Lima (fictício)', value: 28540.75, budgetYear: '2026', status: 'Em pagamento' },
+  { id: 'ord-4', kind: 'RPV', number: 'RPV-2026/01098', beneficiary: 'Ana Beatriz Rocha (fictício)', value: 14980.2, budgetYear: '2026', status: 'Quitado' },
+]
+
+export const waitingBoxSeed: WaitingBox[] = [
+  { id: 'wait-1', process: 'ADM-2026/00481', reason: 'Aguardando diligência da Secretaria de Saúde', returnAt: 'Retorno automático em 24h', owner: 'Dra. Alice Campos' },
+  { id: 'wait-2', process: '1009320-18.2026.8.26.0664', reason: 'Aguardando juntada de comprovante pelo contribuinte', returnAt: 'Retorno automático em 5 dias', owner: 'Dra. Helena Prado' },
+  { id: 'wait-3', process: '5002198-10.2026.4.03.6106', reason: 'Aguardando resposta do perito', returnAt: 'Retorno automático em D-2 do prazo', owner: 'Dr. Rafael Nunes' },
 ]
 
 export const money = (value: number) =>

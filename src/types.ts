@@ -92,6 +92,24 @@ export interface AppUser {
   createdAt: string
 }
 
+export interface CourtOrder {
+  id: string
+  kind: 'Precatório' | 'RPV'
+  number: string
+  beneficiary: string
+  value: number
+  budgetYear: string
+  status: 'Aguardando orçamento' | 'Em pagamento' | 'Quitado'
+}
+
+export interface WaitingBox {
+  id: string
+  process: string
+  reason: string
+  returnAt: string
+  owner: string
+}
+
 export interface DatajudProcess {
   numeroProcesso: string
   tribunal: string
