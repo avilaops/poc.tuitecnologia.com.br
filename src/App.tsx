@@ -153,9 +153,24 @@ function App() {
         credentials: 'same-origin',
       })
     } finally {
-      window.location.assign(import.meta.env.BASE_URL)
+      // replace() não deixa a página autenticada no histórico do navegador.
+      window.location.replace(import.meta.env.BASE_URL)
     }
   }
+
+  useEffect(() => {
+    // Se o navegador restaurar a página do bfcache (botão Voltar após sair),
+    // revalida a sessão e volta ao login quando ela não existe mais.
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return
+      void fetch(`${import.meta.env.BASE_URL}api/auth/session`, { credentials: 'same-origin' })
+        .then((response) => {
+          if (response.status === 401) window.location.replace(import.meta.env.BASE_URL)
+        })
+    }
+    window.addEventListener('pageshow', onPageShow)
+    return () => window.removeEventListener('pageshow', onPageShow)
+  }, [])
 
   const navigate = (target: ViewId) => {
     setView(target)
@@ -221,7 +236,7 @@ function App() {
           <button className="search-trigger" onClick={() => setSearchOpen(true)} aria-label="Buscar processo, CDA ou parte"><Search size={17} /><span>Buscar processo, CDA ou parte</span><kbd>⌘ K</kbd></button>
           <button className="icon-button notification-button" aria-label="Notificações"><Bell size={19} /><i /></button>
           <button className="user-pill" onClick={() => navigate('poc')}><span>HP</span><div><strong>Helena Prado</strong><small>Procuradora</small></div></button>
-          <button className="icon-button" onClick={logout} aria-label="Sair da demonstração" title="Sair"><LogOut size={18} /></button>
+          <button className="logout-button" onClick={logout} aria-label="Sair da demonstração" title="Sair da demonstração"><LogOut size={17} /><span>Sair</span></button>
         </header>
 
         <div className="content-wrap">
@@ -585,20 +600,74 @@ function DeadlinesView({ processes, setProcesses, onAudit, notify }: { processes
   </section>
 }
 
-interface CertificateInfo { subject: string | null; organization: string | null; issuer: string; serialNumber: string; notBefore: string; notAfter: string; icpBrasil: boolean; algorithm: string }
+interface CertificateInfo { subject: string | null; organization: string | null; issuer: string; serialNumber: string; notBefore: string; notAfter: string; icpBrasil: boolean; test: boolean; uploaded: boolean; expired: boolean; algorithm: string }
 
 function PetitionsView({ processes, setProcesses, onAudit, notify }: { processes: LegalProcess[]; setProcesses: React.Dispatch<React.SetStateAction<LegalProcess[]>>; onAudit: (action: string, target: string, source: AuditEvent['source'], detail: string, actor?: string) => void; notify: (message: string) => void }) {
   const signable = processes.filter((item) => item.status === 'Para assinatura')
   const [selected, setSelected] = useState<string[]>(signable.map((item) => item.id))
   const [signing, setSigning] = useState(false)
   const [certificate, setCertificate] = useState<{ mode: string; a3Ready: boolean; certificate: CertificateInfo } | null>(null)
+  const [role, setRole] = useState<string | null>(null)
+  const [certFile, setCertFile] = useState<File | null>(null)
+  const [certPassword, setCertPassword] = useState('')
+  const [certBusy, setCertBusy] = useState(false)
+
+  const loadCertificate = () => fetch(`${import.meta.env.BASE_URL}api/sign/certificate`, { credentials: 'same-origin' })
+    .then((response) => response.ok ? response.json() : null)
+    .then(setCertificate)
+    .catch(() => setCertificate(null))
 
   useEffect(() => {
-    void fetch(`${import.meta.env.BASE_URL}api/sign/certificate`, { credentials: 'same-origin' })
+    void loadCertificate()
+    void fetch(`${import.meta.env.BASE_URL}api/auth/session`, { credentials: 'same-origin' })
       .then((response) => response.ok ? response.json() : null)
-      .then(setCertificate)
-      .catch(() => setCertificate(null))
+      .then((payload) => setRole(payload?.user?.role ?? null))
+      .catch(() => setRole(null))
   }, [])
+
+  const uploadCertificate = async () => {
+    if (!certFile || !certPassword) return
+    setCertBusy(true)
+    try {
+      const buffer = await certFile.arrayBuffer()
+      const p12Base64 = btoa(Array.from(new Uint8Array(buffer), (byte) => String.fromCharCode(byte)).join(''))
+      const response = await fetch(`${import.meta.env.BASE_URL}api/sign/certificate/upload`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ p12Base64, password: certPassword }),
+      })
+      const payload = await response.json()
+      if (!response.ok) {
+        notify(payload.error || 'Não foi possível instalar o certificado.')
+        return
+      }
+      await loadCertificate()
+      setCertFile(null)
+      setCertPassword('')
+      onAudit('Certificado digital instalado', payload.certificate.subject ?? 'certificado', 'Usuário', `${payload.certificate.issuer}${payload.certificate.icpBrasil ? ' (cadeia ICP-Brasil)' : ''}; válido até ${new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short' }).format(new Date(payload.certificate.notAfter))}.`)
+      notify(`Certificado de ${payload.certificate.subject} instalado; as próximas assinaturas já o utilizam.`)
+    } finally {
+      setCertBusy(false)
+    }
+  }
+
+  const removeCertificate = async () => {
+    setCertBusy(true)
+    try {
+      const response = await fetch(`${import.meta.env.BASE_URL}api/sign/certificate`, { method: 'DELETE', credentials: 'same-origin' })
+      const payload = await response.json()
+      if (!response.ok) {
+        notify(payload.error || 'Não foi possível remover o certificado.')
+        return
+      }
+      await loadCertificate()
+      onAudit('Certificado digital removido', 'certificado enviado', 'Usuário', 'O serviço voltou ao certificado configurado no ambiente.')
+      notify('Certificado removido; o serviço voltou ao certificado do ambiente.')
+    } finally {
+      setCertBusy(false)
+    }
+  }
 
   const sign = async () => {
     const targets = processes.filter((item) => selected.includes(item.id))
@@ -644,8 +713,20 @@ function PetitionsView({ processes, setProcesses, onAudit, notify }: { processes
         <span><small>Validade</small><strong>{cert ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short' }).format(new Date(cert.notAfter)) : '—'}</strong></span>
         <span><small>Algoritmo</small><strong>{cert?.algorithm ?? '—'}</strong></span>
       </div>
-      {cert && !cert.icpBrasil && <div className="demo-warning"><AlertTriangle size={17} /><p><strong>Certificado de teste</strong>A assinatura CMS/PKCS#7 embutida no PDF é real; para validade jurídica, configure um e-CPF/e-CNPJ A1 ou o token A3 (driver PKCS#11).</p></div>}
+      {cert?.test && <div className="demo-warning"><AlertTriangle size={17} /><p><strong>Certificado de teste</strong>A assinatura CMS/PKCS#7 embutida no PDF é real; envie abaixo um e-CPF/e-CNPJ A1 (.pfx) para validade jurídica plena.</p></div>}
+      {cert && !cert.test && cert.icpBrasil && <div className="human-note"><BadgeCheck size={17} /><p><strong>Cadeia ICP-Brasil ativa</strong>As assinaturas produzidas têm validade jurídica plena.</p></div>}
+      {cert && !cert.test && !cert.icpBrasil && <div className="demo-warning"><AlertTriangle size={17} /><p><strong>Certificado fora da cadeia ICP-Brasil</strong>O certificado instalado é válido, mas o emissor não é uma AC ICP-Brasil.</p></div>}
       {certificate?.a3Ready && <div className="human-note"><KeyRound size={17} /><p><strong>Token A3 configurado</strong>Driver PKCS#11 carregado no servidor de assinatura.</p></div>}
+      {role === 'owner' && <div className="cert-manager">
+        <p className="section-kicker">Gerenciar certificado (A1)</p>
+        <label className="cert-file-label">{certFile ? certFile.name : 'Escolher arquivo .pfx / .p12'}<input type="file" accept=".pfx,.p12,application/x-pkcs12" onChange={(e) => setCertFile(e.target.files?.[0] ?? null)} /></label>
+        <input className="cert-pass-input" type="password" value={certPassword} onChange={(e) => setCertPassword(e.target.value)} placeholder="Senha do certificado" autoComplete="off" />
+        <div className="cert-manager-actions">
+          <button className="secondary-button" disabled={!certFile || !certPassword || certBusy} onClick={() => void uploadCertificate()}>{certBusy ? <RefreshCw className="spin" size={15} /> : <Fingerprint size={15} />} Instalar certificado</button>
+          {cert?.uploaded && <button className="secondary-button" disabled={certBusy} onClick={() => void removeCertificate()}><X size={15} /> Remover</button>}
+        </div>
+        <p className="safe-copy">O arquivo fica no servidor com permissão restrita; a senha nunca é exibida. A instalação gera evento de auditoria.</p>
+      </div>}
       <button disabled={!selected.length || signing} className="primary-button full" onClick={() => void sign()}>{signing ? <RefreshCw className="spin" size={17} /> : <KeyRound size={17} />} {selected.length > 1 ? `Assinar em lote (${selected.length}) — PAdES` : 'Assinar digitalmente (PAdES)'}</button>
       <p className="safe-copy">A assinatura é aplicada no servidor e o PDF assinado é baixado. Toda execução gera evento de auditoria.</p></aside>
   </div>

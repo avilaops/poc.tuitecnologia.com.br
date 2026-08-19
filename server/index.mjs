@@ -51,7 +51,9 @@ app.use(helmet({
   },
   referrerPolicy: { policy: 'no-referrer' },
 }))
-app.use(express.json({ limit: '16kb' }))
+const jsonSmall = express.json({ limit: '16kb' })
+// O upload de certificado tem parser próprio (256kb) na rota; as demais ficam em 16kb.
+app.use((req, res, next) => req.path === '/api/sign/certificate/upload' ? next() : jsonSmall(req, res, next))
 app.use(express.urlencoded({ extended: false, limit: '8kb' }))
 
 function requestContext(req) {
@@ -361,7 +363,7 @@ app.use(async (req, res, next) => {
     const session = await getSession(req)
     if (!session) {
       await recordEvent(req, 'protected_asset_requested', { success: false, path: req.originalUrl })
-      if (req.accepts('html')) return res.status(401).type('html').send(loginPage({ error: req.query.error === '1' }))
+      if (req.accepts('html')) return res.status(401).type('html').set('Cache-Control', 'no-store').send(loginPage({ error: req.query.error === '1' }))
       return res.status(401).json({ error: 'Autenticação necessária.' })
     }
     req.auth = session
@@ -372,7 +374,12 @@ app.use(async (req, res, next) => {
 })
 
 app.use(express.static(distDir, { index: false, maxAge: '1h', immutable: false }))
-app.get('*path', (_req, res) => res.sendFile(path.join(distDir, 'index.html')))
+app.get('*path', (_req, res) => {
+  // no-store impede que o navegador restaure a aplicação do cache (inclusive
+  // bfcache) depois do logout.
+  res.set('Cache-Control', 'no-store')
+  res.sendFile(path.join(distDir, 'index.html'))
+})
 
 app.use((error, _req, res, _next) => {
   console.error(error)
