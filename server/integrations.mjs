@@ -61,24 +61,93 @@ function normalizeHit(hit) {
   }
 }
 
+// DJEN (Comunicações Processuais do CNJ): a API pública geo-bloqueia acesso
+// de fora do Brasil, então a consulta sai por um proxy em Cloudflare Worker
+// (djen-proxy), cujo egress passa no filtro. Só repassa /api/* do DJEN.
+const DJEN_PROXY = process.env.DJEN_PROXY_URL || 'https://djen-proxy.nicolas-85b.workers.dev'
+
+async function djenComunicacoes({ tribunal, numeroProcesso, itens = 10 }, timeoutMs = 15_000) {
+  const params = new URLSearchParams({ pagina: '1', itensPorPagina: String(itens) })
+  if (tribunal) params.set('siglaTribunal', tribunal)
+  if (numeroProcesso) params.set('numeroProcesso', numeroProcesso)
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  const startedAt = performance.now()
+  try {
+    const response = await fetch(`${DJEN_PROXY}/api/v1/comunicacao?${params}`, { signal: controller.signal })
+    const latencyMs = Math.round(performance.now() - startedAt)
+    if (!response.ok) {
+      throw Object.assign(new Error(`DJEN respondeu ${response.status}`), { status: 502, latencyMs })
+    }
+    return { payload: await response.json(), latencyMs }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+function normalizeComunicacao(item) {
+  return {
+    id: item.id,
+    data: item.data_disponibilizacao ?? null,
+    tribunal: item.siglaTribunal ?? null,
+    tipo: item.tipoComunicacao ?? null,
+    orgao: item.nomeOrgao ?? null,
+    numeroProcesso: item.numero_processo ?? item.numeroprocessocommascara ?? null,
+    // O texto vem como HTML do diário; a POC mostra só o começo, limpo.
+    resumo: String(item.texto || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 280) || null
+  }
+}
+
 export function registerIntegrationRoutes(app, { requireSession, recordEvent }) {
+  // Comunicações reais (citações/intimações) do DJEN, via proxy nacional.
+  app.post('/api/integrations/djen/comunicacoes', requireSession, async (req, res, next) => {
+    try {
+      const tribunal = String(req.body?.tribunal || 'TJSP').toUpperCase()
+      const digits = String(req.body?.number || '').replace(/\D/g, '')
+      const { payload, latencyMs } = await djenComunicacoes({
+        tribunal,
+        numeroProcesso: digits.length === 20 ? digits : undefined,
+        itens: digits ? 20 : 10
+      })
+      const itens = (payload.items || []).map(normalizeComunicacao)
+      await recordEvent(req, 'integration_djen_lookup', {
+        userId: req.auth.user_id,
+        success: true,
+        metadata: { tribunal, numero: digits || null, total: payload.count ?? itens.length, latencyMs }
+      })
+      res.json({ latencyMs, provider: 'DJEN — Comunicações Processuais (CNJ)', total: payload.count ?? itens.length, comunicacoes: itens })
+    } catch (error) {
+      next(error)
+    }
+  })
+
   // Saúde real dos conectores DataJud: uma consulta cronometrada por tribunal.
   app.get('/api/integrations/status', requireSession, async (req, res, next) => {
     try {
-      const results = await Promise.all(Object.keys(datajudAliases).map(async (tribunal) => {
-        try {
-          const { payload, latencyMs } = await datajudSearch(tribunal, { size: 0, query: { match_all: {} } }, 8_000)
-          return {
-            tribunal,
-            ok: true,
-            latencyMs,
-            totalIndexed: payload?.hits?.total?.value ?? null,
-            totalRelation: payload?.hits?.total?.relation ?? null,
+      const results = await Promise.all([
+        ...Object.keys(datajudAliases).map(async (tribunal) => {
+          try {
+            const { payload, latencyMs } = await datajudSearch(tribunal, { size: 0, query: { match_all: {} } }, 8_000)
+            return {
+              tribunal,
+              ok: true,
+              latencyMs,
+              totalIndexed: payload?.hits?.total?.value ?? null,
+              totalRelation: payload?.hits?.total?.relation ?? null,
+            }
+          } catch (error) {
+            return { tribunal, ok: false, latencyMs: error.latencyMs ?? null, error: error.message }
           }
-        } catch (error) {
-          return { tribunal, ok: false, latencyMs: error.latencyMs ?? null, error: error.message }
-        }
-      }))
+        }),
+        (async () => {
+          try {
+            const { payload, latencyMs } = await djenComunicacoes({ tribunal: 'TJSP', itens: 1 }, 10_000)
+            return { tribunal: 'DJEN', ok: true, latencyMs, totalIndexed: payload.count ?? null, totalRelation: 'gte' }
+          } catch (error) {
+            return { tribunal: 'DJEN', ok: false, latencyMs: error.latencyMs ?? null, error: error.message }
+          }
+        })()
+      ])
       await recordEvent(req, 'integration_health_check', {
         userId: req.auth.user_id,
         success: results.every((item) => item.ok),

@@ -786,6 +786,7 @@ function IntegrationsView({ onAudit, notify }: { onAudit: (action: string, targe
   const [lookupNumber, setLookupNumber] = useState('')
   const [lookupTribunal, setLookupTribunal] = useState('TJSP')
   const [lookup, setLookup] = useState<{ loading: boolean; error?: string; result?: DatajudProcess; latency?: number } | null>(null)
+  const [comunicacoes, setComunicacoes] = useState<{ total: number; latency: number; itens: Array<{ id: number; data: string | null; tipo: string | null; orgao: string | null; resumo: string | null }> } | null>(null)
 
   const checkHealth = async (announce = false) => {
     setChecking(true)
@@ -813,21 +814,37 @@ function IntegrationsView({ onAudit, notify }: { onAudit: (action: string, targe
   const digits = lookupNumber.replace(/\D/g, '')
   const runLookup = async () => {
     setLookup({ loading: true })
+    setComunicacoes(null)
     try {
-      const response = await fetch(`${import.meta.env.BASE_URL}api/integrations/datajud/process`, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tribunal: lookupTribunal, number: digits }),
-      })
-      const payload = await response.json()
-      if (!response.ok) {
+      // As duas consultas reais em paralelo: processo (DataJud) e
+      // citações/intimações publicadas no diário (DJEN).
+      const [processoRes, djenRes] = await Promise.all([
+        fetch(`${import.meta.env.BASE_URL}api/integrations/datajud/process`, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tribunal: lookupTribunal, number: digits }),
+        }),
+        fetch(`${import.meta.env.BASE_URL}api/integrations/djen/comunicacoes`, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tribunal: lookupTribunal, number: digits }),
+        }).catch(() => null),
+      ])
+      const payload = await processoRes.json()
+      if (!processoRes.ok) {
         setLookup({ loading: false, error: payload.error || 'Falha na consulta.' })
-        return
+      } else {
+        setLookup({ loading: false, result: payload.process, latency: payload.latencyMs })
+        onAudit('Consulta processual real', payload.process.numeroProcesso, 'Integração', `DataJud/CNJ · ${lookupTribunal} · ${payload.latencyMs} ms.`, 'API Pública DataJud')
       }
-      setLookup({ loading: false, result: payload.process, latency: payload.latencyMs })
-      onAudit('Consulta processual real', payload.process.numeroProcesso, 'Integração', `DataJud/CNJ · ${lookupTribunal} · ${payload.latencyMs} ms.`, 'API Pública DataJud')
-      notify('Processo localizado no índice público do tribunal.')
+      if (djenRes?.ok) {
+        const djen = await djenRes.json()
+        setComunicacoes({ total: djen.total, latency: djen.latencyMs, itens: djen.comunicacoes || [] })
+        onAudit('Comunicações do diário consultadas', digits || lookupTribunal, 'Integração', `DJEN/CNJ · ${djen.comunicacoes?.length ?? 0} de ${djen.total} comunicações · ${djen.latencyMs} ms.`, 'DJEN — Comunicações')
+      }
+      if (processoRes.ok) notify('Consulta real concluída: processo e comunicações do diário.')
     } catch {
       setLookup({ loading: false, error: 'Não foi possível alcançar o serviço de integração.' })
     }
@@ -842,7 +859,7 @@ function IntegrationsView({ onAudit, notify }: { onAudit: (action: string, targe
   }
 
   return <div className="stack-lg">
-    <div className="integration-banner real"><Network size={21} /><div><strong>Consulta processual real homologada — API Pública DataJud/CNJ</strong><p>Os conectores de tribunais executam consultas reais ao índice nacional do CNJ, com latência e resposta auditadas. DJEN, SEI/PEN e 1DOC seguem honestamente marcados como pendentes de convênio ou egresso nacional.</p></div><button className="secondary-button" disabled={checking} onClick={() => void checkHealth(true)}>{checking ? <RefreshCw className="spin" size={16} /> : <Activity size={16} />} Verificar agora</button></div>
+    <div className="integration-banner real"><Network size={21} /><div><strong>Consultas reais homologadas — DataJud e DJEN (CNJ)</strong><p>Os conectores de tribunais consultam o índice nacional de processos, e o DJEN entrega citações e intimações publicadas no diário — tudo com latência e resposta auditadas. SEI/PEN, 1DOC e STF seguem honestamente marcados como pendentes de convênio.</p></div><button className="secondary-button" disabled={checking} onClick={() => void checkHealth(true)}>{checking ? <RefreshCw className="spin" size={16} /> : <Activity size={16} />} Verificar agora</button></div>
 
     <section className="panel datajud-panel">
       <div className="panel-heading"><div><p className="section-kicker">Consulta unitária</p><h2>Buscar processo real por número CNJ</h2></div><a className="secondary-button" href={`${import.meta.env.BASE_URL}api/docs`} target="_blank" rel="noreferrer"><FileText size={16} /> Documentação da API (OpenAPI)</a></div>
@@ -853,6 +870,19 @@ function IntegrationsView({ onAudit, notify }: { onAudit: (action: string, targe
       </div>
       {lookup?.error && <p className="search-error"><AlertTriangle size={15} /> {lookup.error}</p>}
       {lookup?.result && <DatajudResultCard result={lookup.result} latency={lookup.latency ?? null} />}
+      {comunicacoes && (
+        <div className="datajud-result">
+          <div className="datajud-result-head"><BadgeCheck size={17} /><div><strong>Comunicações no diário (DJEN)</strong><small>{comunicacoes.itens.length} de {comunicacoes.total} · {comunicacoes.latency} ms</small></div><span className="small-badge success">Dado real · DJEN/CNJ</span></div>
+          {comunicacoes.itens.length === 0
+            ? <p className="search-hint">Nenhuma citação/intimação publicada para este número.</p>
+            : <div className="djen-list">{comunicacoes.itens.slice(0, 5).map((item) => (
+                <div className="djen-item" key={item.id}>
+                  <div><strong>{item.tipo || 'Comunicação'}</strong><small>{item.data || ''} · {item.orgao || ''}</small></div>
+                  {item.resumo && <p>{item.resumo}…</p>}
+                </div>
+              ))}</div>}
+        </div>
+      )}
     </section>
 
     <section className="integration-grid">{connectors.map((connector) => {

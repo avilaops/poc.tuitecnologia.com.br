@@ -599,3 +599,10 @@ input[type="checkbox"] { accent-color: var(--teal); }
 .cert-pass-input:focus { border-color: #75bbb2; box-shadow: 0 0 0 4px #e8f6f3; }
 .cert-manager-actions { display: flex; gap: 8px; }
 .cert-manager-actions .secondary-button { flex: 1; justify-content: center; }
+
+/* Lista de comunicações do DJEN */
+.djen-list { display: grid; gap: 8px; margin-top: 10px; }
+.djen-item { padding: 9px 11px; background: #fff; border: 1px solid #e3ecea; border-radius: 10px; }
+.djen-item strong { font-size: 12px; color: #162634; }
+.djen-item small { margin-left: 8px; color: var(--muted); font-size: 10px; }
+.djen-item p { margin: 4px 0 0; color: #536672; font-size: 11px; line-height: 1.5; }
